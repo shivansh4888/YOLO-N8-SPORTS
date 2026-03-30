@@ -1,0 +1,39 @@
+# ─────────────────────────────────────────────────────────────
+# Multi-Object Tracking — Dependency List
+# Install with:  pip install -r requirements.txt
+# ─────────────────────────────────────────────────────────────
+
+# ── Core detection framework ──────────────────────────────────
+# YOLOv8 by Ultralytics — state-of-the-art real-time detector.
+# Includes ByteTrack integration out of the box via supervision.
+ultralytics>=8.0.0
+
+# ── Tracking + annotation helper ─────────────────────────────
+# Supervision by Roboflow — wraps ByteTrack, draws boxes/trails.
+# This is the glue between YOLO detections and the tracker.
+supervision>=0.18.0
+
+# ── Video I/O ─────────────────────────────────────────────────
+# OpenCV handles reading frames, writing output MP4, resizing.
+opencv-python-headless>=4.8.0   # headless = no GUI window needed
+
+# ── Numerical computing ───────────────────────────────────────
+numpy>=1.24.0
+
+# ── Visualisation & plots ─────────────────────────────────────
+matplotlib>=3.7.0               # heatmaps, count-over-time charts
+
+# ── Video download ────────────────────────────────────────────
+# yt-dlp — best-in-class YouTube / public video downloader.
+# Successor to youtube-dl, actively maintained.
+yt-dlp>=2024.1.0
+
+# ── Progress bars ─────────────────────────────────────────────
+tqdm>=4.65.0                    # shows frame-processing progress
+
+# ── Optional: CUDA acceleration ───────────────────────────────
+# If you have an NVIDIA GPU, install the matching torch+cu build:
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+# CPU-only works fine for demo; GPU gives ~10× speed.
+torch>=2.0.0
+torchvision>=0.15.0
