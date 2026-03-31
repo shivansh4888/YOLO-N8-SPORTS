@@ -41,10 +41,6 @@ MIN_BOX_AREA         = 600            # px² — filter distant/tiny detections
 INFERENCE_SIZE       = 1280           # longer side in pixels
 
 # ── Tracking — BoT-SORT ───────────────────────────────────────────
-# BoT-SORT: ByteTrack + camera-motion compensation (ECC homography)
-# Built into Ultralytics — no extra install needed.
-# Key advantage over ByteTrack: compensates for camera pan/zoom so
-# predicted positions are more accurate → fewer ID switches.
 TRACK_BUFFER         = 30    # frames a lost track survives
 TRACK_IOU_THRESHOLD  = 0.30
 BOTSORT_GMC          = True  # Global Motion Compensation (ECC algorithm)
@@ -73,25 +69,12 @@ PITCH_REAL_PTS = [
 ]
 
 # ── Face detection + clustering ───────────────────────────────────
-ENABLE_FACE_ID       = True
-
-# InsightFace model — buffalo_sc is the lightweight CPU-friendly model.
-# buffalo_l is more accurate but ~3× slower. Use buffalo_sc on CPU.
+ENABLE_FACE_ID       = False   # set True only if you add data/faces/ reference photos
 FACE_MODEL_PACK      = "buffalo_sc"   # auto-downloads ~10MB
-
-# Face detection runs every N frames (heavy on CPU)
 FACE_DETECT_INTERVAL = 10            # frames
-
-# Minimum face size to attempt recognition (pixels, shorter side)
 MIN_FACE_SIZE        = 40
-
-# DBSCAN clustering parameters
-# eps: cosine distance threshold for "same person" (0–2 scale)
-# 0.4 = tight clusters (fewer merges), 0.6 = looser (fewer splits)
 FACE_CLUSTER_EPS     = 0.45
-FACE_CLUSTER_MIN_SAMPLES = 2         # min detections to form a cluster
-
-# Save best face crop per cluster for the face grid output
+FACE_CLUSTER_MIN_SAMPLES = 2
 SAVE_FACE_CROPS      = True
 
 # ── Jersey OCR ───────────────────────────────────────────────────
@@ -100,15 +83,30 @@ JERSEY_OCR_INTERVAL  = 20           # every 20 frames on CPU
 JERSEY_CROP_PADDING  = 0.12
 JERSEY_OCR_CONF      = 0.55
 
-# Optional: map jersey numbers to names if you know them later
-# Leave empty for "no roster" mode — shows #7, #18 etc.
-PLAYER_ROSTER: dict = {}
-# Example (add yours after seeing the jersey numbers detected):
+# Optional: map jersey numbers to names.
+# Leave empty — it is auto-loaded from data/roster.csv at startup.
+# You can still hardcode here if you prefer:
 # PLAYER_ROSTER = {"7": "MS Dhoni", "18": "Virat Kohli"}
+PLAYER_ROSTER: dict = {}
+
+# ── Face reference matching (Mode B) ─────────────────────────────
+# Cosine similarity threshold to accept a reference photo match (0–1).
+# 0.45 works well for broadcast footage.
+# Raise to 0.50 if getting wrong names, lower to 0.40 if missing matches.
+FACE_MATCH_THRESHOLD  = 0.45
+
+# Minimum cumulative vote score before a name is confirmed.
+# Each matching frame adds ~0.5–0.9 to the score.
+# 3.0 ≈ ~5 good matching frames before the name is locked in.
+FACE_MATCH_MIN_VOTES  = 3.0
 
 # ── Video processing ─────────────────────────────────────────────
-FRAME_SKIP    = 1      # process every other frame on CPU (saves ~40% time)
+FRAME_SKIP    = 1      # process every Nth frame (1 = every frame, 2 = every other)
 OUTPUT_CODEC  = "mp4v"
+
+# ── Heatmap ──────────────────────────────────────────────────────
+HEATMAP_SIGMA    = 8          # Gaussian blur sigma (higher = smoother)
+HEATMAP_COLORMAP = "hot"      # "hot" | "jet" | "plasma"
 
 # ── Annotation ───────────────────────────────────────────────────
 TRAIL_LENGTH       = 35
