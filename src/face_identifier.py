@@ -318,14 +318,15 @@ class FaceIdentifier:
           ""               if nothing known yet (show just the track ID)
         """
         face_label = self.track_labels.get(int(track_id), "")
-        roster_name = config.PLAYER_ROSTER.get(jersey, "") if jersey else ""
+        jersey_key = str(jersey).strip() if jersey else ""
+        roster_name = config.PLAYER_ROSTER.get(jersey_key, "") if jersey_key else ""
 
         if roster_name:
-            return f"#{jersey} {roster_name}"
-        elif jersey and face_label:
-            return f"#{jersey} {face_label}"
-        elif jersey:
-            return f"#{jersey}"
+            return f"#{jersey_key} {roster_name}"
+        elif jersey_key and face_label:
+            return f"#{jersey_key} {face_label}"
+        elif jersey_key:
+            return f"#{jersey_key}"
         elif face_label:
             return face_label
         return ""

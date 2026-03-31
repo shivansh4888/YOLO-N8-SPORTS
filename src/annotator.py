@@ -73,16 +73,18 @@ class Annotator:
             # HUD badge
             speed  = speed_est.get_speed(tid) if speed_est else 0.0
             jersey = tracker.id_jersey.get(int(tid), "")
+            # Always do a live PLAYER_ROSTER lookup so names show even
+            # when face_id is disabled. Strip the jersey string to be safe.
+            jersey_key = str(jersey).strip()
+            roster_name = config.PLAYER_ROSTER.get(jersey_key, "")
             # Build display label — works with or without face_id
             if face_id:
-                label = face_id.get_label(tid, jersey)
+                label = face_id.get_label(tid, jersey_key)
             else:
-                # jersey-only mode: look up name from roster directly
-                name  = config.PLAYER_ROSTER.get(jersey, "")
-                if name:
-                    label = f"#{jersey} {name}"
-                elif jersey:
-                    label = f"#{jersey}"
+                if roster_name:
+                    label = f"#{jersey_key} {roster_name}"
+                elif jersey_key:
+                    label = f"#{jersey_key}"
                 else:
                     label = ""
             self._hud(out, tid, label, speed, x1, y1, col)

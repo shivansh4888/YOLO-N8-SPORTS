@@ -150,13 +150,17 @@ class BotSortTracker:
 
     def assign_jersey(self, track_id: int, jersey_str: str, confidence: float):
         """Accumulate jersey votes and update best reading."""
-        if not jersey_str.strip():
+        jersey_str = str(jersey_str).strip()
+        if not jersey_str:
             return
         tid = int(track_id)
         self._jersey_votes[tid][jersey_str] += confidence
         best = max(self._jersey_votes[tid], key=self._jersey_votes[tid].get)
         self.id_jersey[tid] = best
-        self.id_name[tid] = config.PLAYER_ROSTER.get(best, "")
+        name = config.PLAYER_ROSTER.get(best, "")
+        self.id_name[tid] = name
+        if name:
+            print(f"[Tracker] ID {tid} → jersey #{best} → {name}")
 
     def get_trail(self, track_id: int, length: int = config.TRAIL_LENGTH) -> list:
         return self.track_history.get(int(track_id), [])[-length:]
