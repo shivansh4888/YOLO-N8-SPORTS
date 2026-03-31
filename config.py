@@ -89,6 +89,31 @@ JERSEY_OCR_CONF      = 0.55
 # PLAYER_ROSTER = {"7": "MS Dhoni", "18": "Virat Kohli"}
 PLAYER_ROSTER: dict = {}
 
+# ── Auto-load roster from data/roster.csv ────────────────────────
+# Expected CSV format:
+#   jersey,name
+#   7,MS Dhoni
+#   18,Virat Kohli
+_ROSTER_PATH = os.path.join(DATA_DIR, "roster.csv")
+if os.path.exists(_ROSTER_PATH):
+    try:
+        import csv
+        with open(_ROSTER_PATH, newline="", encoding="utf-8") as _f:
+            _reader = csv.DictReader(_f)
+            # Normalise header names to lowercase and strip whitespace
+            for _row in _reader:
+                _keys = [k.strip().lower() for k in _row.keys()]
+                _vals = [v.strip() for v in _row.values()]
+                _row_clean = dict(zip(_keys, _vals))
+                _jersey = _row_clean.get("jersey", "").strip()
+                _name   = _row_clean.get("name", "").strip()
+                if _jersey and _name:
+                    PLAYER_ROSTER[_jersey] = _name
+        if PLAYER_ROSTER:
+            print(f"[config] Loaded {len(PLAYER_ROSTER)} players from roster.csv: {PLAYER_ROSTER}")
+    except Exception as _e:
+        print(f"[config] Warning: could not load roster.csv — {_e}")
+
 # ── Face reference matching (Mode B) ─────────────────────────────
 # Cosine similarity threshold to accept a reference photo match (0–1).
 # 0.45 works well for broadcast footage.
