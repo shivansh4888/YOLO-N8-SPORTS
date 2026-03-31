@@ -88,6 +88,9 @@ def run(args):
     if jersey_ocr and not jersey_ocr.is_available:
         jersey_ocr = None
 
+    # Wire jersey_ocr into annotator so back-name reads work
+    annotator.set_jersey_ocr(jersey_ocr)
+
     # Face identifier
     face_id = FaceIdentifier() if not args.no_face else None
     if face_id and not face_id.is_available:
