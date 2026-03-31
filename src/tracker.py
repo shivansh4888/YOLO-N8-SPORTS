@@ -48,7 +48,7 @@ HUNGARIAN ALGORITHM:
 import numpy as np
 import supervision as sv
 import sys, os
-
+from src.botsort_tracker import BotSORT 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import config
 

@@ -1,42 +1,42 @@
 # ─────────────────────────────────────────────────────────────────
-# Multi-Object Tracking — PRO EDITION
-# Install: pip install -r requirements.txt
-# NEW vs v1: boxmot (StrongSORT+OSNet), easyocr, pandas
+# Sports MOT — CPU-optimised full feature set
+# pip install -r requirements.txt
 # ─────────────────────────────────────────────────────────────────
 
-# Core detection
-ultralytics>=8.0.0
+# Detection
+ultralytics>=8.2.0          # YOLOv8 — also includes BoT-SORT tracker
 
-# Unified tracking library — StrongSORT, BoT-SORT, ByteTrack
-# OSNet Re-ID weights download automatically on first run
-boxmot>=10.0.0
-
-# Annotation helpers (bounding boxes, colours, etc.)
+# Tracking + annotation utilities
 supervision>=0.21.0
 
 # Video I/O
-opencv-python-headless>=4.8.0
+opencv-python-headless>=4.9.0
 
-# Numerics
-numpy>=1.24.0
-scipy>=1.10.0
+# Numerics / signal processing
+numpy>=1.26.0
+scipy>=1.12.0               # gaussian_filter, DBSCAN via sklearn
 
-# Plots & heatmaps
-matplotlib>=3.7.0
+# Face detection + embedding (CPU-friendly, ~50ms/face)
+# insightface uses ONNX Runtime — runs fast on CPU
+insightface>=0.7.3
+onnxruntime>=1.17.0         # CPU ONNX backend for insightface
 
-# Jersey number OCR — handles blurry low-res crops
-easyocr>=1.7.0
+# Jersey number OCR
+easyocr>=1.7.1              # runs every 20 frames, fine on CPU
 
-# Player stats export
-pandas>=2.0.0
-
-# Deep learning backend
-torch>=2.0.0
-torchvision>=0.15.0
-# GPU users: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+# Plots, heatmaps, stats
+matplotlib>=3.8.0
+pandas>=2.1.0
+scikit-learn>=1.4.0         # DBSCAN for face clustering
 
 # Video download
-yt-dlp>=2024.1.0
+yt-dlp>=2024.3.0
 
 # Progress bars
-tqdm>=4.65.0
+tqdm>=4.66.0
+
+# Deep learning backend (CPU torch — lighter install)
+torch>=2.1.0
+torchvision>=0.16.0
+# If you have NVIDIA GPU later:
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121

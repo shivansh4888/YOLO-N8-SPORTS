@@ -1,23 +1,17 @@
 """
-src/annotator.py
-────────────────
-Draws all visual overlays onto video frames:
-  • Colour-coded bounding boxes (unique colour per track ID)
-  • Track ID label with background pill
-  • Motion trail (last N centre-points as a fading polyline)
-  • Active player count overlay (top-left corner)
+src/annotator.py — Pro HUD Edition
+────────────────────────────────────
+Draws per-player HUD badge:
 
-WHY UNIQUE COLOURS PER ID?
-  Human eye easily distinguishes colour — so if ID 3 is always cyan
-  and ID 7 is always orange, you can follow individuals instantly
-  without reading the number. Critical for sports analysis UX.
+  ┌──────────────────┐
+  │  Player-A  #7    │  ← face cluster label + jersey number
+  │  24.3 km/h       │  ← speed (green/amber/red by intensity)
+  └──────────────────┘
+  [    bounding box  ]
+  ~~~ fading trail ~~~
 
-THE COLOUR ASSIGNMENT TRICK (interview-worthy):
-  We use HSV colour space, not RGB. Hue = 0°–360°.
-  Map track_id → hue by:  hue = (track_id * golden_ratio_angle) % 360
-  The golden ratio angle (137.5°) distributes colours maximally
-  far apart from each other, so consecutive IDs never look similar.
-  Convert HSV → BGR for OpenCV rendering.
+Colour assignment: golden-angle HSV → unique colour per track ID.
+Speed colour: green ≤10, amber 10–25, red >25 km/h.
 """
 
 import cv2
@@ -29,190 +23,96 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import config
 
 
-# ── Golden-angle colour generator ─────────────────────────────────
-# This function maps any integer ID to a visually distinct BGR colour.
+def id_to_bgr(track_id: int) -> tuple:
+    hue = int((int(track_id) * 137.508) % 360)
+    hsv = np.uint8([[[hue // 2, 210, 230]]])
+    bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)[0][0]
+    return int(bgr[0]), int(bgr[1]), int(bgr[2])
 
-def id_to_color(track_id: int) -> tuple[int, int, int]:
-    """
-    Maps a track ID to a unique, visually distinct BGR colour.
 
-    Uses the golden angle (137.508°) in HSV hue space so that
-    adjacent IDs get maximally separated hues.
-
-    Returns: (B, G, R) tuple of uint8 values for OpenCV.
-    """
-    GOLDEN_ANGLE = 137.508  # degrees — derived from golden ratio
-    hue = int((track_id * GOLDEN_ANGLE) % 360)
-
-    # HSV → BGR via OpenCV
-    # Create a 1×1 HSV pixel and convert it
-    hsv_pixel = np.uint8([[[hue // 2, 220, 230]]])  # hue/2 because OpenCV uses 0-180
-    bgr_pixel = cv2.cvtColor(hsv_pixel, cv2.COLOR_HSV2BGR)[0][0]
-    return int(bgr_pixel[0]), int(bgr_pixel[1]), int(bgr_pixel[2])
+def speed_bgr(kmh: float) -> tuple:
+    if kmh < 10:   return (40, 190, 40)    # green  — walking
+    if kmh < 25:   return (20, 190, 215)   # amber  — jogging
+    return             (40,  50, 215)       # red    — sprinting
 
 
 class Annotator:
-    """
-    Draws all visual overlays onto a copy of each video frame.
+    def __init__(self):
+        self.font       = cv2.FONT_HERSHEY_SIMPLEX
+        self.trail_len  = config.TRAIL_LENGTH
+        self.box_thick  = config.BOX_THICKNESS
 
-    Design choice: we always draw on a COPY of the frame, never
-    mutating the original. This lets callers keep the clean frame
-    if needed (e.g., for re-processing or saving separately).
-    """
-
-    def __init__(
-        self,
-        draw_trails: bool = config.DRAW_TRAILS,
-        trail_length: int = config.TRAIL_LENGTH,
-        box_thickness: int = config.BOX_THICKNESS,
-        show_count: bool = config.SHOW_COUNT_OVERLAY,
-    ):
-        self.draw_trails  = draw_trails
-        self.trail_length = trail_length
-        self.box_thickness = box_thickness
-        self.show_count   = show_count
-
-    def annotate(
-        self,
-        frame: np.ndarray,
-        tracked: sv.Detections,
-        tracker,  # Tracker instance — for trail history
-        frame_idx: int = 0,
-    ) -> np.ndarray:
-        """
-        Draw all annotations on a copy of the frame.
-
-        Args:
-            frame:     BGR frame (H, W, 3).
-            tracked:   sv.Detections with .xyxy and .tracker_id.
-            tracker:   The Tracker instance (for trail history).
-            frame_idx: Current frame index (used for count overlay).
-
-        Returns:
-            annotated: BGR frame with all overlays drawn.
-        """
-        annotated = frame.copy()
+    def annotate(self, frame, tracked, tracker, speed_est, face_id, frame_idx=0):
+        out = frame.copy()
 
         if tracked.tracker_id is None or len(tracked) == 0:
-            if self.show_count:
-                self._draw_count_overlay(annotated, 0, frame_idx)
-            return annotated
+            if config.SHOW_COUNT_OVERLAY:
+                self._count(out, 0, frame_idx)
+            return out
 
-        # ── Draw each tracked person ──────────────────────────────
-        for i, track_id in enumerate(tracked.tracker_id):
+        for i, tid in enumerate(tracked.tracker_id):
             x1, y1, x2, y2 = tracked.xyxy[i].astype(int)
-            color = id_to_color(track_id)
+            col = id_to_bgr(tid)
 
-            # ── Motion trail ──────────────────────────────────────
-            if self.draw_trails:
-                trail = tracker.get_trail(track_id, self.trail_length)
-                self._draw_trail(annotated, trail, color)
+            # Trail
+            if config.DRAW_TRAILS:
+                for j, trail in enumerate(self._trail_segs(tracker, tid)):
+                    a = (j + 1) / len(tracker.get_trail(tid, self.trail_len))
+                    cv2.line(out, trail[0], trail[1],
+                             tuple(int(c*a) for c in col), max(1, int(a*3)), cv2.LINE_AA)
 
-            # ── Bounding box ──────────────────────────────────────
-            cv2.rectangle(
-                annotated,
-                (x1, y1), (x2, y2),
-                color,
-                self.box_thickness,
-                lineType=cv2.LINE_AA,  # anti-aliased = smoother edges
-            )
+            # Bounding box
+            cv2.rectangle(out, (x1, y1), (x2, y2), col, self.box_thick, cv2.LINE_AA)
 
-            # ── ID label with background ──────────────────────────
-            self._draw_label(annotated, track_id, x1, y1, color)
+            # HUD badge
+            speed  = speed_est.get_speed(tid)  if speed_est  else 0.0
+            jersey = tracker.id_jersey.get(int(tid), "")
+            f_lbl  = face_id.get_label(tid, jersey) if face_id else ""
+            self._hud(out, tid, f_lbl, jersey, speed, x1, y1, col)
 
-        # ── Player count overlay ──────────────────────────────────
-        if self.show_count:
-            self._draw_count_overlay(annotated, len(tracked), frame_idx)
+        if config.SHOW_COUNT_OVERLAY:
+            self._count(out, len(tracked), frame_idx)
+        return out
 
-        return annotated
+    def _trail_segs(self, tracker, tid):
+        trail = tracker.get_trail(tid, self.trail_len)
+        return [
+            ((int(trail[j-1][0]), int(trail[j-1][1])),
+             (int(trail[j][0]),   int(trail[j][1])))
+            for j in range(1, len(trail))
+        ]
 
-    # ── Private drawing helpers ────────────────────────────────────
+    def _hud(self, frame, tid, face_lbl, jersey, speed, x1, y1, col):
+        F, s1, s2, th, pad = self.font, 0.50, 0.42, 1, 4
 
-    def _draw_trail(
-        self,
-        frame: np.ndarray,
-        trail: list[tuple[float, float]],
-        color: tuple[int, int, int],
-    ) -> None:
-        """
-        Draws a fading polyline trail.
+        # Row 1: face label or jersey or ID
+        if face_lbl:
+            row1 = face_lbl
+        elif jersey:
+            row1 = f"#{jersey}"
+        else:
+            row1 = f"ID {tid}"
 
-        WHY FADING?
-        Opacity decreases for older positions — this gives the viewer
-        a sense of direction AND speed (widely spaced points = fast).
-        """
-        if len(trail) < 2:
-            return
+        # Row 2: speed
+        row2 = f"{speed:.1f} km/h" if speed > 0.5 else f"ID {tid}"
 
-        for j in range(1, len(trail)):
-            pt1 = (int(trail[j - 1][0]), int(trail[j - 1][1]))
-            pt2 = (int(trail[j][0]),     int(trail[j][1]))
+        (w1, h1), _ = cv2.getTextSize(row1, F, s1, th)
+        (w2, h2), _ = cv2.getTextSize(row2, F, s2, th)
+        bw = max(w1, w2) + 2 * pad
+        bh = h1 + h2 + 3 * pad
+        by2 = max(y1 - 2, bh)
+        by1 = by2 - bh
+        r1y2 = by1 + h1 + 2 * pad
 
-            # Opacity: older points are more transparent
-            alpha = j / len(trail)           # 0.0 (oldest) → 1.0 (newest)
-            thickness = max(1, int(alpha * 3))  # thinner for older points
+        cv2.rectangle(frame, (x1, by1),  (x1 + bw, r1y2), col,        -1)
+        cv2.rectangle(frame, (x1, r1y2), (x1 + bw, by2),  (25, 25, 25), -1)
+        cv2.putText(frame, row1, (x1+pad, r1y2-pad-1), F, s1, (255,255,255), th, cv2.LINE_AA)
+        cv2.putText(frame, row2, (x1+pad, by2-pad),    F, s2, speed_bgr(speed), th, cv2.LINE_AA)
 
-            # Blend colour with frame background for fading effect
-            fade_color = tuple(int(c * alpha) for c in color)
-            cv2.line(frame, pt1, pt2, fade_color, thickness, lineType=cv2.LINE_AA)
-
-    def _draw_label(
-        self,
-        frame: np.ndarray,
-        track_id: int,
-        x1: int, y1: int,
-        color: tuple[int, int, int],
-    ) -> None:
-        """
-        Draws a filled pill background + white ID text above the bounding box.
-
-        Design: coloured background matching the box → visually cohesive.
-        """
-        label   = f"ID {track_id}"
-        font    = cv2.FONT_HERSHEY_SIMPLEX
-        scale   = config.LABEL_FONT_SCALE
-        thick   = 1
-
-        # Measure text size to size the background rectangle
-        (tw, th), baseline = cv2.getTextSize(label, font, scale, thick)
-        pad = 3
-
-        # Background rectangle
-        bg_x1 = x1
-        bg_y1 = max(y1 - th - 2 * pad - baseline, 0)
-        bg_x2 = x1 + tw + 2 * pad
-        bg_y2 = max(y1, th + baseline)
-
-        cv2.rectangle(frame, (bg_x1, bg_y1), (bg_x2, bg_y2), color, -1)  # -1 = filled
-
-        # White text on coloured background
-        cv2.putText(
-            frame, label,
-            (x1 + pad, max(y1 - pad - baseline, th)),
-            font, scale, (255, 255, 255), thick, cv2.LINE_AA,
-        )
-
-    def _draw_count_overlay(
-        self,
-        frame: np.ndarray,
-        count: int,
-        frame_idx: int,
-    ) -> None:
-        """
-        Draws a semi-transparent black bar at top-left showing player count.
-        """
-        text   = f"Players: {count}   Frame: {frame_idx}"
-        font   = cv2.FONT_HERSHEY_SIMPLEX
-        scale  = 0.7
-        thick  = 2
-        color  = (255, 255, 255)  # white text
-
-        (tw, th), _ = cv2.getTextSize(text, font, scale, thick)
-        pad = 8
-
-        # Semi-transparent overlay (black rectangle, alpha blended)
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (0, 0), (tw + 2 * pad, th + 2 * pad), (0, 0, 0), -1)
-        cv2.addWeighted(overlay, 0.5, frame, 0.5, 0, frame)  # 50% transparent
-
-        cv2.putText(frame, text, (pad, th + pad), font, scale, color, thick, cv2.LINE_AA)
+    def _count(self, frame, count, frame_idx):
+        txt = f"Players: {count}   Frame: {frame_idx}"
+        (tw, th), _ = cv2.getTextSize(txt, self.font, 0.60, 2)
+        ov = frame.copy()
+        cv2.rectangle(ov, (0,0), (tw+16, th+16), (0,0,0), -1)
+        cv2.addWeighted(ov, 0.5, frame, 0.5, 0, frame)
+        cv2.putText(frame, txt, (8, th+8), self.font, 0.60, (255,255,255), 2, cv2.LINE_AA)

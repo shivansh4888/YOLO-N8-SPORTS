@@ -1,198 +1,288 @@
 """
-main.py
-───────
-Pipeline orchestrator — ties all modules together.
-
-This is the ENTRY POINT. Running this file:
-  1. Loads config
-  2. Opens the input video
-  3. Initialises YOLOv8 detector + ByteTrack tracker + annotator
-  4. Processes every frame: detect → track → annotate → write
-  5. Generates post-processing outputs: heatmap, trajectories, count plot
-  6. Prints a summary
+main.py — CPU Full-Feature MOT Pipeline
+─────────────────────────────────────────
+Features:
+  [1] YOLOv8m detection
+  [2] BoT-SORT tracking  (camera-motion compensated → stable IDs)
+  [3] Speed estimation   (homography → km/h per player)
+  [4] Jersey OCR         (EasyOCR every 20 frames → #number)
+  [5] Face clustering    (InsightFace + DBSCAN → Player-A/B/C)
+  [6] Pro HUD annotation (badge: name + jersey + speed)
+  [7] Heatmap, trajectories, speed chart, player CSV
 
 USAGE:
-    python main.py
-    python main.py --video data/my_clip.mp4
-    python main.py --video data/clip.mp4 --skip 2 --no-trails
+  python main.py
+  python main.py --video data/myclip.mp4
+  python main.py --no-face     (skip face ID, faster)
+  python main.py --no-speed    (skip homography)
+  python main.py --no-ocr      (skip jersey OCR)
 
-DESIGN PATTERN — "orchestrator" main:
-  main.py knows WHAT to do and in what ORDER.
-  It does NOT know HOW each step works — that lives in the modules.
-  This is the "single responsibility principle" applied to main files.
-
-INTERVIEW ANSWER TO "WALK ME THROUGH YOUR CODE":
-  Start here. Trace the data flow:
-  frame (numpy) → Detector → raw detections (numpy)
-  raw detections → Tracker → tracked Detections (supervision)
-  tracked Detections → Annotator → annotated frame (numpy)
-  annotated frame → VideoWriter → output.mp4
+INTERVIEW ANSWER — "walk me through your pipeline":
+  Every frame goes through 4 stages:
+  detect → track → enrich (speed + jersey + face) → annotate
+  Each stage is a separate module → single responsibility principle.
+  Heavy ops (OCR, face) are rate-limited for CPU viability.
+  Post-processing generates analytics after the video loop.
 """
 
 import argparse
 import sys
 import os
-from tqdm import tqdm  # progress bar — shows frame-processing progress
+from src.botsort_tracker import BotSortTracker 
+from tqdm import tqdm
 
-# ── Add project root to Python path ──────────────────────────────
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config
-from src.detector  import Detector
-from src.tracker   import Tracker
-from src.annotator import Annotator
-from src.video_io  import VideoReader, VideoWriter
-from utils.heatmap import generate_heatmap
-from utils.stats   import plot_count_over_time, plot_trajectories, print_summary
+from src.video_io        import VideoReader, VideoWriter
+from src.annotator       import Annotator
+from src.speed_estimator import SpeedEstimator
+from src.jersey_ocr      import JerseyOCR
+from src.face_identifier import FaceIdentifier
+from src.botsort_tracker import BotSortTracker
+from utils.heatmap       import generate_heatmap
+from utils.stats         import (plot_count_over_time, plot_trajectories,
+                                  print_summary)
+
+# We import YOLO here to use its built-in track() with BoT-SORT
+from ultralytics import YOLO
 
 
 def parse_args():
-    """Command-line argument parsing."""
-    parser = argparse.ArgumentParser(
-        description="Multi-Object Tracking for Sports Footage",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument(
-        "--video", type=str, default=config.INPUT_VIDEO,
-        help="Path to input video file",
-    )
-    parser.add_argument(
-        "--output", type=str, default=config.OUTPUT_VIDEO,
-        help="Path for annotated output video",
-    )
-    parser.add_argument(
-        "--skip", type=int, default=config.FRAME_SKIP,
-        help="Process every (skip+1)th frame. 0=every frame.",
-    )
-    parser.add_argument(
-        "--no-trails", action="store_true",
-        help="Disable motion trail drawing",
-    )
-    parser.add_argument(
-        "--model", type=str, default=config.YOLO_MODEL,
-        help="YOLOv8 model weights (yolov8n/s/m/l/x.pt)",
-    )
-    return parser.parse_args()
+    p = argparse.ArgumentParser(description="Sports MOT — CPU Full Feature Pipeline")
+    p.add_argument("--video",     default=config.INPUT_VIDEO)
+    p.add_argument("--output",    default=config.OUTPUT_VIDEO)
+    p.add_argument("--model",     default=config.YOLO_MODEL)
+    p.add_argument("--skip",      type=int, default=config.FRAME_SKIP)
+    p.add_argument("--no-speed",  action="store_true")
+    p.add_argument("--no-ocr",    action="store_true")
+    p.add_argument("--no-face",   action="store_true")
+    p.add_argument("--no-trails", action="store_true")
+    return p.parse_args()
 
 
-def run_pipeline(args) -> None:
-    """
-    Main pipeline execution.
+def run(args):
+    print("\n" + "═"*60)
+    print("  SPORTS MOT — CPU FULL FEATURE PIPELINE")
+    print(f"  Video  : {args.video}")
+    print(f"  Output : {args.output}")
+    print("═"*60 + "\n")
 
-    DATA FLOW PER FRAME:
-      raw_frame
-        ↓  Detector.detect()
-      detections: np.ndarray (N, 6)  [x1,y1,x2,y2,conf,cls]
-        ↓  Tracker.update()
-      tracked: sv.Detections  (with .tracker_id assigned)
-        ↓  Annotator.annotate()
-      annotated_frame: np.ndarray
-        ↓  VideoWriter.write()
-      saved to output.mp4
-    """
+    # ── Initialise all modules ────────────────────────────────────
+    print("[main] Loading YOLOv8 model...")
+    model = YOLO(args.model)
 
-    print("\n" + "═" * 60)
-    print("  MULTI-OBJECT TRACKING PIPELINE")
-    print("  Model    :", args.model)
-    print("  Input    :", args.video)
-    print("  Output   :", args.output)
-    print("  Frame skip:", args.skip)
-    print("═" * 60 + "\n")
+    tracker   = BotSortTracker()
+    annotator = Annotator()
 
-    # ── Initialise pipeline components ───────────────────────────
-    detector  = Detector(model_path=args.model)
-    tracker   = Tracker()
-    annotator = Annotator(draw_trails=not args.no_trails)
+    # Speed estimator
+    speed_est = None
+    if not args.no_speed and config.ENABLE_SPEED:
+        speed_est = SpeedEstimator()
+        if not speed_est.calibrate():
+            print("[main] Speed estimation unavailable (update PITCH_PIXEL_PTS in config.py)")
+            speed_est = None
 
-    # Keep a reference frame for heatmap overlay (use first frame)
+    # Jersey OCR
+    jersey_ocr = JerseyOCR() if not args.no_ocr else None
+    if jersey_ocr and not jersey_ocr.is_available:
+        jersey_ocr = None
+
+    # Face identifier
+    face_id = FaceIdentifier() if not args.no_face else None
+    if face_id and not face_id.is_available:
+        face_id = None
+
+    print("\n[main] Module status:")
+    print(f"  BoT-SORT tracker : ready")
+    print(f"  Speed estimator  : {'ready' if speed_est else 'disabled'}")
+    print(f"  Jersey OCR       : {'ready' if jersey_ocr else 'disabled'}")
+    print(f"  Face ID          : {'ready' if face_id else 'disabled'}")
+    print()
+
     reference_frame = None
-    total_frames_written = 0
+    # Speed history for chart: track_id → [(frame_idx, speed)]
+    speed_history: dict = {}
 
-    # ── Open video reader ─────────────────────────────────────────
+    # ── Main video loop ───────────────────────────────────────────
     with VideoReader(args.video) as reader:
-        meta = reader.metadata
+        if speed_est:
+            speed_est.fps = reader.fps
 
-        # Open writer with same resolution and FPS as input
-        # Note: if FRAME_SKIP > 0, effective FPS of output is lower.
-        # We keep original FPS so playback speed is preserved (slow motion effect removed).
+        meta  = reader.metadata
+        total = reader.frame_count // max(args.skip + 1, 1)
+
+        os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+
         with VideoWriter(args.output, reader.fps, reader.width, reader.height) as writer:
 
-            # tqdm wraps the generator to show a live progress bar
-            frame_gen = reader.frames(skip=args.skip)
-            total_expected = reader.frame_count // (args.skip + 1)
-
             for frame, frame_idx in tqdm(
-                frame_gen,
-                total=total_expected,
-                desc="Processing frames",
-                unit="frame",
-                ncols=80,
+                reader.frames(skip=args.skip),
+                total=total, desc="Processing", unit="frame", ncols=80,
             ):
-                # ── Save first frame for heatmap background ───────
                 if reference_frame is None:
                     reference_frame = frame.copy()
 
-                # ── STEP 1: Detect ────────────────────────────────
-                detections = detector.detect(frame)
+                # ── DETECT + TRACK (BoT-SORT via YOLO .track()) ──
+                # persist=True keeps the tracker state between calls
+                # tracker="botsort" uses BoT-SORT with GMC
+                results = model.track(
+                    frame,
+                    persist=True,
+                    tracker="botsort.yaml",
+                    conf=config.CONFIDENCE_THRESHOLD,
+                    classes=config.TARGET_CLASSES,
+                    imgsz=config.INFERENCE_SIZE,
+                    verbose=False,
+                )
+                tracked = tracker.update_from_results(results)
 
-                # ── STEP 2: Track ─────────────────────────────────
-                tracked = tracker.update(detections, frame)
+                if tracked.tracker_id is not None and len(tracked) > 0:
 
-                # ── STEP 3: Annotate ──────────────────────────────
+                    # ── SPEED ESTIMATION ─────────────────────────
+                    if speed_est:
+                        for i, tid in enumerate(tracked.tracker_id):
+                            x1, y1, x2, y2 = tracked.xyxy[i]
+                            cx, cy = (x1+x2)/2, (y1+y2)/2
+                            spd = speed_est.update(int(tid), cx, cy)
+                            if tid not in speed_history:
+                                speed_history[tid] = []
+                            speed_history[tid].append((frame_idx, spd))
+
+                    # ── JERSEY OCR (every N frames) ───────────────
+                    if jersey_ocr and frame_idx % config.JERSEY_OCR_INTERVAL == 0:
+                        for i, tid in enumerate(tracked.tracker_id):
+                            num, conf = jersey_ocr.read(frame, tracked.xyxy[i], tid)
+                            if num:
+                                tracker.assign_jersey(tid, num, conf)
+
+                    # ── FACE ID (every N frames) ──────────────────
+                    if face_id and frame_idx % config.FACE_DETECT_INTERVAL == 0:
+                        face_id.process_frame(
+                            frame,
+                            tracked.xyxy,
+                            tracked.tracker_id,
+                        )
+
+                    # ── Periodic face clustering ───────────────────
+                    # Cluster every 100 frames so labels stabilise gradually
+                    if face_id and frame_idx > 0 and frame_idx % 100 == 0:
+                        face_id.cluster_and_label()
+
+                # ── ANNOTATE ─────────────────────────────────────
                 annotated = annotator.annotate(
-                    frame, tracked, tracker, frame_idx
+                    frame, tracked, tracker, speed_est, face_id, frame_idx
                 )
 
-                # ── STEP 4: Write ─────────────────────────────────
+                # ── WRITE ─────────────────────────────────────────
                 writer.write(annotated)
-                total_frames_written += 1
 
-    # ── Post-processing: generate analytics outputs ───────────────
-    print("\n[Pipeline] Generating post-processing outputs...")
+    # ── Final clustering pass ─────────────────────────────────────
+    if face_id:
+        print("\n[main] Running final face clustering...")
+        face_id.cluster_and_label()
+        face_id.save_face_grid(config.OUTPUT_FACE_GRID)
 
-    frame_shape = (reader.height, reader.width)
+    # ── Post-processing analytics ─────────────────────────────────
+    print("[main] Generating analytics outputs...")
+    shape = (reader.height, reader.width)
 
-    # 1. Movement heatmap
-    all_positions = tracker.get_all_positions()
     generate_heatmap(
-        positions=all_positions,
-        frame_shape=frame_shape,
-        reference_frame=reference_frame,
-        output_path=config.OUTPUT_HEATMAP,
+        tracker.get_all_positions(), shape,
+        reference_frame, config.OUTPUT_HEATMAP
     )
+    plot_count_over_time(tracker.frame_counts, reader.fps, config.OUTPUT_COUNT_PLOT)
+    plot_trajectories(tracker.track_history, shape, config.OUTPUT_TRAJECTORY)
 
-    # 2. Count over time plot
-    plot_count_over_time(
-        frame_counts=tracker.frame_counts,
-        fps=reader.fps,
-        output_path=config.OUTPUT_COUNT_PLOT,
-    )
+    if speed_history:
+        _save_speed_chart(speed_history, reader.fps)
 
-    # 3. Trajectory visualisation
-    plot_trajectories(
-        track_history=tracker.track_history,
-        frame_shape=frame_shape,
-        output_path=config.OUTPUT_TRAJECTORY,
-    )
-
-    # 4. Summary
+    _export_csv(tracker, speed_est, face_id)
     print_summary(tracker.summary(), meta)
 
-    print(f"[Pipeline] All done!")
-    print(f"  Annotated video  → {args.output}")
-    print(f"  Heatmap          → {config.OUTPUT_HEATMAP}")
-    print(f"  Count plot       → {config.OUTPUT_COUNT_PLOT}")
-    print(f"  Trajectories     → {config.OUTPUT_TRAJECTORY}\n")
+    print("\n[main] Done! Outputs:")
+    outputs = [
+        ("Annotated video ", args.output),
+        ("Heatmap         ", config.OUTPUT_HEATMAP),
+        ("Trajectories    ", config.OUTPUT_TRAJECTORY),
+        ("Count plot      ", config.OUTPUT_COUNT_PLOT),
+        ("Speed chart     ", config.OUTPUT_SPEED_PLOT),
+        ("Face grid       ", config.OUTPUT_FACE_GRID),
+        ("Player CSV      ", config.OUTPUT_STATS_CSV),
+    ]
+    for label, path in outputs:
+        exists = "[ok]" if os.path.exists(path) else "[--]"
+        print(f"  {exists} {label} → {path}")
+
+
+def _save_speed_chart(speed_history: dict, fps: float):
+    """Simple speed-over-time chart."""
+    try:
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(figsize=(12, 4))
+        colors = plt.cm.tab20.colors
+        for idx, (tid, readings) in enumerate(speed_history.items()):
+            if not readings:
+                continue
+            times  = [r[0] / max(fps, 1) for r in readings]
+            speeds = [r[1] for r in readings]
+            ax.plot(times, speeds, color=colors[idx % 20], linewidth=0.9,
+                    alpha=0.8, label=f"ID {tid}")
+        ax.axhline(25, color="orange", linestyle="--", linewidth=0.7, alpha=0.5)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Speed (km/h)")
+        ax.set_ylim(0, config.MAX_SPEED_KMH + 5)
+        ax.set_title("Player speeds over time", fontweight="bold")
+        ax.grid(axis="y", alpha=0.3)
+        if len(speed_history) <= 12:
+            ax.legend(fontsize=7, loc="upper right")
+        plt.tight_layout()
+        os.makedirs(os.path.dirname(config.OUTPUT_SPEED_PLOT), exist_ok=True)
+        plt.savefig(config.OUTPUT_SPEED_PLOT, dpi=130)
+        plt.close()
+        print(f"[main] Speed chart saved → {config.OUTPUT_SPEED_PLOT}")
+    except Exception as e:
+        print(f"[main] Speed chart failed: {e}")
+
+
+def _export_csv(tracker, speed_est, face_id):
+    """Export per-player stats to CSV."""
+    try:
+        import pandas as pd
+        rows = []
+        for tid, positions in tracker.track_history.items():
+            jersey    = tracker.id_jersey.get(tid, "")
+            name      = tracker.id_name.get(tid, "")
+            face_lbl  = face_id.track_labels.get(tid, "") if face_id else ""
+            label     = face_id.get_label(tid, jersey) if face_id else (f"#{jersey}" if jersey else "")
+            max_spd   = speed_est.get_max_speed(tid) if speed_est else 0.0
+            avg_spd   = speed_est.get_speed(tid)     if speed_est else 0.0
+            rows.append({
+                "track_id":       tid,
+                "display_label":  label or f"ID {tid}",
+                "jersey_number":  jersey,
+                "player_name":    name,
+                "face_cluster":   face_lbl,
+                "frames_tracked": len(positions),
+                "max_speed_kmh":  round(max_spd, 1),
+                "avg_speed_kmh":  round(avg_spd, 1),
+            })
+        if not rows:
+            return
+        df = pd.DataFrame(rows).sort_values("frames_tracked", ascending=False)
+        os.makedirs(os.path.dirname(config.OUTPUT_STATS_CSV), exist_ok=True)
+        df.to_csv(config.OUTPUT_STATS_CSV, index=False)
+        print(f"[main] Player CSV saved → {config.OUTPUT_STATS_CSV} ({len(df)} players)")
+    except Exception as e:
+        print(f"[main] CSV export failed: {e}")
 
 
 if __name__ == "__main__":
     args = parse_args()
-
-    # Validate input file exists
     if not os.path.exists(args.video):
-        print(f"[ERROR] Input video not found: {args.video}")
-        print("  Run:  python download_video.py")
-        print("  Or:   python main.py --video /path/to/your/video.mp4")
+        print(f"\n[ERROR] Video not found: {args.video}")
+        print("  Step 1: python download_video.py")
+        print("  Step 2: python utils/pick_points.py  (click 4 pitch corners)")
+        print("  Step 3: python main.py\n")
         sys.exit(1)
-
-    run_pipeline(args)
+    run(args)
