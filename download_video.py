@@ -62,7 +62,7 @@ def download_video(url: str, output_path: str) -> bool:
 
     cmd = [
         "yt-dlp",
-        "-f", "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[ext=mp4]",
+        "-f", "bv*[vcodec^=avc1][height<=720]+ba/best[vcodec^=avc1]",
         "--merge-output-format", "mp4",
         "--no-playlist",
         "-o", output_path,
