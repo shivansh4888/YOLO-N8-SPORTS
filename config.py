@@ -78,7 +78,7 @@ FACE_CLUSTER_MIN_SAMPLES = 2
 SAVE_FACE_CROPS      = True
 
 # ── Jersey OCR ───────────────────────────────────────────────────
-ENABLE_JERSEY_OCR    = True
+ENABLE_JERSEY_OCR    = False
 JERSEY_OCR_INTERVAL  = 20           # every 20 frames on CPU
 JERSEY_CROP_PADDING  = 0.12
 JERSEY_OCR_CONF      = 0.55

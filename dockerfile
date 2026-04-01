@@ -1,56 +1,34 @@
-# ── Base image ────────────────────────────────────────────────────
-# python:3.11-slim is ~150MB vs full python:3.11 (~1GB)
-FROM python:3.11-slim
+FROM python:3.10-slim
 
-# ── System deps ───────────────────────────────────────────────────
-# ffmpeg  → video re-encoding for browser playback
-# libgl1  → OpenCV needs it on headless servers
-# yt-dlp  → YouTube downloader (installed via pip, updated regularly)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install system deps (IMPORTANT)
+RUN apt-get update && apt-get install -y \
     ffmpeg \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    curl \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Working directory ─────────────────────────────────────────────
 WORKDIR /app
 
-# ── Python dependencies ───────────────────────────────────────────
-# Copy requirements first — Docker layer caching means if requirements
-# don't change, pip install is skipped on re-builds. Huge time saver.
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# ── EasyOCR model pre-download ────────────────────────────────────
-# Download language models at build time so the first request isn't slow.
-# The models are cached at /root/.EasyOCR/
-RUN python -c "import easyocr; easyocr.Reader(['en'], gpu=False, verbose=False)" || true
-
-# ── YOLO model pre-download ───────────────────────────────────────
-RUN python -c "from ultralytics import YOLO; YOLO('yolov8m.pt')" || true
-
-# ── Copy application code ─────────────────────────────────────────
 COPY . .
 
-# ── Create required directories ───────────────────────────────────
-RUN mkdir -p data outputs
+# Install python deps
+RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir \
+    flask \
+    gunicorn \
+    yt-dlp \
+    ultralytics \
+    easyocr \
+    insightface \
+    onnxruntime \
+    scikit-learn \
+    opencv-python-headless \
+    supervision
 
-# ── Port (Railway injects $PORT at runtime) ───────────────────────
-EXPOSE 5000
+# Expose port
+ENV PORT=8080
 
-# ── Start command ─────────────────────────────────────────────────
-# gunicorn: production WSGI server (not Flask's dev server)
-# --timeout 600: video processing can take several minutes
-# --workers 1: each worker needs full RAM for YOLO; 1 is correct for free tier
-CMD ["gunicorn", "app:app", \
-     "--bind", "0.0.0.0:$PORT", \
-     "--timeout", "600", \
-     "--workers", "1", \
-     "--threads", "4", \
-     "--worker-class", "gthread", \
-     "--log-level", "info"]
+# Start server
+CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:8080", "--timeout", "600"]
+RUN python -c "from ultralytics import YOLO; YOLO('yolov8m.pt')"
