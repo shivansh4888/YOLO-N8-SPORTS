@@ -40,3 +40,26 @@ torch>=2.1.0
 torchvision>=0.16.0
 # If you have NVIDIA GPU later:
 # pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# ── Core ML / CV ──────────────────────────────────────────────────
+ultralytics>=8.2.0          # YOLOv8 + BoT-SORT tracker built-in
+supervision>=0.21.0         # Detection/tracking helpers
+opencv-python-headless>=4.9 # Headless: no GUI deps (important on servers)
+numpy>=1.26
+easyocr>=1.7.1              # Jersey OCR
+
+# ── Web framework ─────────────────────────────────────────────────
+flask>=3.0
+gunicorn>=22.0.0            # Production WSGI server
+
+# ── Video download ────────────────────────────────────────────────
+yt-dlp>=2024.11.18          # YouTube downloader (fork of youtube-dl)
+
+# ── Analytics / export ────────────────────────────────────────────
+pandas>=2.2
+matplotlib>=3.9
+scipy>=1.13                 # Used by heatmap generation
+
+# ── Optional: InsightFace for face clustering ─────────────────────
+# Uncomment if ENABLE_FACE_ID = True in config.py
+# insightface>=0.7.3
+# onnxruntime>=1.18          # CPU inference backend for InsightFace

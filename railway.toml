@@ -1,0 +1,23 @@
+# railway.toml
+# ─────────────
+# Railway reads this file to configure build + deploy behaviour.
+# Docs: https://docs.railway.app/reference/config-as-code
+
+[build]
+# Tell Railway to use our Dockerfile instead of Nixpacks auto-detection.
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Railway injects $PORT — gunicorn binds to it in CMD.
+# startCommand overrides Dockerfile CMD if set here.
+# Leave commented out to use Dockerfile CMD.
+# startCommand = "gunicorn app:app --bind 0.0.0.0:$PORT --timeout 600 --workers 1"
+
+# Restart policy: on-failure keeps the service alive after crashes.
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+# Health check — Railway pings this to confirm the app is up.
+healthcheckPath = "/"
+healthcheckTimeout = 60   # seconds; give the app time to boot + load models
