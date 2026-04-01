@@ -40,7 +40,11 @@ if st.button("🚀 Process Video"):
     st.success("✅ Done!")
 
     # Show video directly
-    st.video(output_path)
+    web_output = output_path.replace(".mp4", "_web.mp4")
+
+    convert_to_web_format(output_path, web_output)
+
+    st.video(web_output)
 
     # Download button
     with open(output_path, "rb") as f:

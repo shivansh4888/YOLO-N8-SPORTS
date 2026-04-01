@@ -247,7 +247,19 @@ def _save_speed_chart(speed_history: dict, fps: float):
     except Exception as e:
         print(f"[main] Speed chart failed: {e}")
 
+import subprocess
 
+def convert_to_web_format(input_path, output_path):
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i", input_path,
+        "-vcodec", "libx264",
+        "-acodec", "aac",
+        "-movflags", "+faststart",
+        output_path
+    ]
+    subprocess.run(cmd)
 def _export_csv(tracker, speed_est, face_id):
     """Export per-player stats to CSV."""
     try:
