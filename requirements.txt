@@ -18,11 +18,11 @@ scipy>=1.12.0               # gaussian_filter, DBSCAN via sklearn
 
 # Face detection + embedding (CPU-friendly, ~50ms/face)
 # insightface uses ONNX Runtime — runs fast on CPU
-insightface>=0.7.3
+# insightface>=0.7.3
 onnxruntime>=1.17.0         # CPU ONNX backend for insightface
 
 # Jersey number OCR
-easyocr>=1.7.1              # runs every 20 frames, fine on CPU
+# easyocr>=1.7.1              # runs every 20 frames, fine on CPU
 
 # Plots, heatmaps, stats
 matplotlib>=3.8.0
