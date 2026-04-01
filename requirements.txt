@@ -45,7 +45,7 @@ ultralytics>=8.2.0          # YOLOv8 + BoT-SORT tracker built-in
 supervision>=0.21.0         # Detection/tracking helpers
 opencv-python-headless>=4.9 # Headless: no GUI deps (important on servers)
 numpy>=1.26
-easyocr>=1.7.1              # Jersey OCR
+# easyocr>=1.7.1              # Jersey OCR
 
 # ── Web framework ─────────────────────────────────────────────────
 flask>=3.0
