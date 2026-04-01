@@ -34,7 +34,7 @@ OUTPUT_FACE_GRID   = os.path.join(OUTPUT_DIR, "face_clusters.png")
 OUTPUT_STATS_CSV   = os.path.join(OUTPUT_DIR, "player_stats.csv")
 
 # ── Detection ─────────────────────────────────────────────────────
-YOLO_MODEL           = "yolov8m.pt"   # m = best CPU speed/accuracy tradeoff
+YOLO_MODEL           = "yolov8n.pt"   # m = best CPU speed/accuracy tradeoff
 TARGET_CLASSES       = [0]            # person only
 CONFIDENCE_THRESHOLD = 0.40
 MIN_BOX_AREA         = 600            # px² — filter distant/tiny detections
